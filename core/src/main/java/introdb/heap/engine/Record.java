@@ -1,28 +1,29 @@
-package introdb.engine.fch;
-
-import introdb.engine.Record;
+package introdb.heap.engine;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-import static introdb.engine.utils.ByteConverterUtils.toBoolean;
-import static introdb.engine.utils.ByteConverterUtils.toByte;
+import static introdb.heap.utils.ByteConverterUtils.toBoolean;
+import static introdb.heap.utils.ByteConverterUtils.toByte;
 
-class FChRecord extends Record {
+public class Record {
 
     private final Header header;
+    private final byte[] key;
+    private final byte[] value;
 
-    FChRecord(Header header, byte[] key, byte[] value) {
-        super(key, value);
+    Record(Header header, byte[] key, byte[] value) {
+        this.key = key;
+        this.value = value;
         this.header = header;
     }
 
-    static FChRecord of(byte[] key, byte[] value) {
+    static Record of(byte[] key, byte[] value) {
         var header = Header.of(key, value);
-        return new FChRecord(header, key, value);
+        return new Record(header, key, value);
     }
 
-    static FChRecord of(ByteBuffer byteBuffer, int offset) {
+    static Record of(ByteBuffer byteBuffer, int offset) {
         var keySize = byteBuffer.getShort(offset);
         var valueSize = byteBuffer.getShort(offset + 2);
         var deleted = toBoolean(byteBuffer.get(offset+4));
@@ -33,7 +34,7 @@ class FChRecord extends Record {
         var value = new byte[valueSize];
         byteBuffer.position(offset + Header.SIZE + keySize).get(value);
 
-        return new FChRecord(Header.of(keySize, valueSize, deleted), key, value);
+        return new Record(Header.of(keySize, valueSize, deleted), key, value);
     }
 
     static boolean exists(ByteBuffer byteBuffer, int offset) {
@@ -41,7 +42,14 @@ class FChRecord extends Record {
         return byteBuffer.getLong() > 0;
     }
 
-    @Override
+    public byte[] key() {
+        return key;
+    }
+
+    public byte[] value() {
+        return value;
+    }
+
     public int size() {
         return key.length + value.length + header.size();
     }

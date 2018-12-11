@@ -1,6 +1,4 @@
-package introdb.engine.fch;
-
-import introdb.engine.Config;
+package introdb.heap.engine;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

@@ -1,4 +1,4 @@
-package introdb.engine.fch;
+package introdb.heap.engine;
 
 import java.nio.ByteBuffer;
 import java.util.HashSet;
@@ -9,7 +9,7 @@ class Page {
 
     private final int number;
     private final int maxSize;
-    private Set<FChRecord> records;
+    private Set<Record> records;
 
     Page(int number, int maxSize) {
         this.number = number;
@@ -22,7 +22,7 @@ class Page {
         return page;
     }
 
-    static Page of(int number, int maxSize, FChRecord record) {
+    static Page of(int number, int maxSize, Record record) {
         var page = new Page(number, maxSize);
         page.addRecord(record);
         return page;
@@ -32,8 +32,8 @@ class Page {
         var page = new Page(number, maxSize);
         var pageOffset = 0;
 
-        while (FChRecord.exists(byteBuffer, pageOffset)) {
-            var record = FChRecord.of(byteBuffer, pageOffset);
+        while (Record.exists(byteBuffer, pageOffset)) {
+            var record = Record.of(byteBuffer, pageOffset);
             page.addRecord(record);
             pageOffset += record.size();
         }
@@ -41,7 +41,7 @@ class Page {
         return page;
     }
 
-    void addRecord(FChRecord record) {
+    void addRecord(Record record) {
         if (!willFit(record)) {
             throw new IllegalArgumentException("Record is too big for current size of the page.");
         }
@@ -58,7 +58,7 @@ class Page {
 
     int size() {
         return records.stream()
-                .mapToInt(FChRecord::size)
+                .mapToInt(Record::size)
                 .sum();
     }
 
@@ -70,7 +70,7 @@ class Page {
         return number;
     }
 
-    boolean willFit(FChRecord record) {
+    boolean willFit(Record record) {
         return (maxSize - size()) > record.size();
     }
 
@@ -79,7 +79,7 @@ class Page {
                 .anyMatch(it -> it.equalsKey(key) && !it.isDeleted());
     }
 
-    Optional<FChRecord> getRecord(byte[] key) {
+    Optional<Record> getRecord(byte[] key) {
         return records.stream()
                 .filter(it -> it.equalsKey(key) && !it.isDeleted())
                 .findAny();

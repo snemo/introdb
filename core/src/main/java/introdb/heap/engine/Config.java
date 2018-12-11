@@ -1,4 +1,4 @@
-package introdb.engine;
+package introdb.heap.engine;
 
 public class Config {
     private final int pageSize;

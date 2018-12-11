@@ -1,6 +1,4 @@
-package introdb.engine.fch;
-
-import introdb.engine.Config;
+package introdb.heap.engine;
 
 import java.io.IOException;
 import java.nio.channels.FileChannel;
@@ -20,13 +18,8 @@ class FileController {
         this.path = path;
     }
 
-    void init() {
-        try {
-            fileChannel = FileChannel.open(path, READ, WRITE);
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    void init() throws IOException {
+        fileChannel = FileChannel.open(path, READ, WRITE);
     }
 
     FileChannel fileChannel() {

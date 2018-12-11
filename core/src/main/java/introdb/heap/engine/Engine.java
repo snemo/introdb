@@ -1,8 +1,4 @@
-package introdb.engine.fch;
-
-import introdb.engine.Config;
-import introdb.engine.Engine;
-import introdb.engine.Record;
+package introdb.heap.engine;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -14,7 +10,7 @@ import java.util.Optional;
  *
  * @author snemo
  */
-class FChEngine implements Engine {
+public class Engine {
 
     private final Config config;
     private final PageReader reader;
@@ -23,26 +19,24 @@ class FChEngine implements Engine {
     private Page lastPage;          // buffer
     private Page currentPage;       // buffer
 
-    private FChEngine(Config config, PageReader reader, PageWriter writer) {
+    private Engine(Config config, PageReader reader, PageWriter writer) {
         this.config = config;
         this.reader = reader;
         this.writer = writer;
         init();
     }
 
-    static FChEngine of(Config config, PageReader reader, PageWriter writer) {
-        return new FChEngine(config, reader, writer);
+    static Engine of(Config config, PageReader reader, PageWriter writer) {
+        return new Engine(config, reader, writer);
     }
 
     public void init() {
-        // FIXME: load last page from file.
         lastPage = Page.of(0, config.pageSize());
     }
 
-    @Override
     public void put(byte[] key, byte[] value) throws IOException {
         remove(key);
-        var record = FChRecord.of(key, value);
+        var record = Record.of(key, value);
 
         if (lastPage.willFit(record)) {
             lastPage.addRecord(record);
@@ -52,11 +46,10 @@ class FChEngine implements Engine {
         }
     }
 
-    @Override
-    public Optional<? extends Record> remove(byte[] key) throws IOException {
+    public Optional<Record> remove(byte[] key) throws IOException {
         var page = getPage(key);
         var record = page.flatMap(it -> it.getRecord(key));
-        record.ifPresent(FChRecord::delete);
+        record.ifPresent(Record::delete);
 
         if (record.isPresent()) {
             writer.write(page.get());
@@ -65,8 +58,7 @@ class FChEngine implements Engine {
         return record;
     }
 
-    @Override
-    public Optional<? extends Record> get(byte[] key) throws IOException {
+    public Optional<Record> get(byte[] key) throws IOException {
         return getPage(key)
                 .flatMap(page -> page.getRecord(key));
     }

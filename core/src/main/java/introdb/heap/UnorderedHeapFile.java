@@ -1,16 +1,16 @@
 package introdb.heap;
 
-import introdb.engine.Config;
-import introdb.engine.Engine;
-import introdb.engine.EngineFactory;
-import introdb.engine.Record;
+import introdb.heap.engine.Config;
+import introdb.heap.engine.Engine;
+import introdb.heap.engine.EngineFactory;
+import introdb.heap.engine.Record;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.nio.file.Path;
 
-import static introdb.engine.utils.SerializationUtils.deserialize;
-import static introdb.engine.utils.SerializationUtils.serialize;
+import static introdb.heap.utils.SerializationUtils.deserialize;
+import static introdb.heap.utils.SerializationUtils.*;
 import static java.util.Objects.isNull;
 
 /**
@@ -19,30 +19,28 @@ import static java.util.Objects.isNull;
  */
 class UnorderedHeapFile implements Store {
 
-    private final Engine dbEngine;
+    private final Engine engine;
 
-	UnorderedHeapFile(Path path, int maxNrPages, int pageSize) {
-//		dbEngine = EngineFactory.createRAMEngine(Config.of(pageSize, maxNrPages));
-//		dbEngine = EngineFactory.createMMFEngine(path, Config.of(pageSize, maxNrPages));
-		dbEngine = EngineFactory.createFileChannelEngine(path, Config.of(pageSize, maxNrPages));
+	UnorderedHeapFile(Path path, int maxNrPages, int pageSize) throws IOException{
+		engine = EngineFactory.createEngine(path, maxNrPages, pageSize);
     }
 
 	@Override
-	public void put(Entry entry) throws IOException, ClassNotFoundException {
-		dbEngine.put(serialize(entry.key()), serialize(entry.value()));
+	synchronized public void put(Entry entry) throws IOException, ClassNotFoundException {
+		engine.put(serialize(entry.key()), serialize(entry.value()));
 	}
 	
 	@Override
-	public Object get(Serializable key) throws IOException, ClassNotFoundException {
-		var valueBytes = dbEngine.get(serialize(key))
+	synchronized public Object get(Serializable key) throws IOException, ClassNotFoundException {
+		var valueBytes = engine.get(serialize(key))
                 .map(Record::value)
                 .orElse(null);
 
         return isNull(valueBytes) ? null : deserialize(valueBytes);
 	}
 	
-	public Object remove(Serializable key) throws IOException, ClassNotFoundException {
-		var valueBytes = dbEngine.remove(serialize(key))
+	synchronized public Object remove(Serializable key) throws IOException, ClassNotFoundException {
+		var valueBytes = engine.remove(serialize(key))
                 .map(Record::value)
                 .orElse(null);
 
