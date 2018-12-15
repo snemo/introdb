@@ -1,12 +1,21 @@
 package introdb.heap.pool;
 
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static java.util.concurrent.CompletableFuture.completedFuture;
+import static java.util.concurrent.CompletableFuture.supplyAsync;
 
 public class ObjectPool<T> {
 
 	private final ObjectFactory<T> fcty;
 	private final ObjectValidator<T> validator;
 	private final int maxPoolSize;
+
+	private final AtomicInteger poolSize = new AtomicInteger(0);
+	private final Queue<T> freePool = new ConcurrentLinkedQueue<>();;
 
 	public ObjectPool(ObjectFactory<T> fcty, ObjectValidator<T> validator) {
 		this(fcty,validator,25);
@@ -26,21 +35,46 @@ public class ObjectPool<T> {
 	 * @return
 	 */
 	public CompletableFuture<T> borrowObject() {
-		return new CompletableFuture<T>();
+		// First try to get obj from free pool
+		T obj = freePool.poll();
+		if (obj != null) {
+			return completedFuture(obj);
+		}
+
+		// Try to create a new object if there is still free space in main pool
+		var currentPoolSize = poolSize.get();
+		if (currentPoolSize < maxPoolSize) {
+			poolSize.incrementAndGet();
+			obj = fcty.create();
+			return completedFuture(obj);
+		}
+
+		// Wait until some object will be returned
+		return supplyAsync(this::waitUntilObjectFreed);
 	}	
 	
 	public void returnObject(T object) {
+		freePool.offer(object);
 	}
 
 	public void shutdown() throws InterruptedException {
 	}
 
 	public int getPoolSize() {
-		return 0;
+		return poolSize.get();
 	}
 
 	public int getInUse() {
-		return 0;
+		return poolSize.get() - freePool.size();
 	}
 
+	private T waitUntilObjectFreed() {
+		T obj;
+
+		while (null == (obj = freePool.poll())) {
+			Thread.onSpinWait();
+		}
+
+		return obj;
+	}
 }
