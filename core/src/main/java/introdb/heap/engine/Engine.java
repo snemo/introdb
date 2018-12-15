@@ -1,7 +1,10 @@
 package introdb.heap.engine;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.Optional;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * InnoDB engine implementation based on FileChannel
@@ -12,26 +15,27 @@ import java.util.Optional;
  */
 public class Engine {
 
-    private final Config config;
-    private final PageReader reader;
-    private final PageWriter writer;
+    private final IOController ioController;
 
     private Page lastPage;          // buffer
     private Page currentPage;       // buffer
 
-    private Engine(Config config, PageReader reader, PageWriter writer) {
-        this.config = config;
-        this.reader = reader;
-        this.writer = writer;
+    private Engine(IOController ioController) throws IOException {
+        this.ioController = ioController;
         init();
     }
 
-    static Engine of(Config config, PageReader reader, PageWriter writer) {
-        return new Engine(config, reader, writer);
+    static Engine of(IOController ioController) throws IOException {
+        return new Engine(ioController);
     }
 
-    public void init() {
-        lastPage = Page.of(0, config.pageSize());
+    public static Engine of(Path path, int maxNrPages, int pageSize) throws IOException {
+        return new Engine(IOController.of(path, maxNrPages, pageSize));
+    }
+
+    public void init() throws IOException {
+        ioController.init();
+        lastPage = Page.of(0, ioController.config().pageSize());
     }
 
     public void put(byte[] key, byte[] value) throws IOException {
@@ -41,18 +45,18 @@ public class Engine {
         if (lastPage.willFit(record)) {
             lastPage.addRecord(record);
         } else {
-            writer.write(lastPage);
-            lastPage = Page.of(lastPage.number()+1, config.pageSize(), record);
+            ioController.write(lastPage);
+            lastPage = Page.of(lastPage.number()+1, ioController.config().pageSize(), record);
         }
     }
 
     public Optional<Record> remove(byte[] key) throws IOException {
         var page = getPage(key);
+
         var record = page.flatMap(it -> it.getRecord(key));
         record.ifPresent(Record::delete);
-
-        if (record.isPresent()) {
-            writer.write(page.get());
+        if (record.isPresent()) { // FIXME:
+            ioController.write(page.get());
         }
 
         return record;
@@ -69,7 +73,7 @@ public class Engine {
             return bufferPage;
         }
 
-        PageIterator iterator = reader.iterator();
+        Iterator<Page> iterator = ioController.iterator();
         while (iterator.hasNext()) {
             var page = iterator.next();
             if (page.contains(key)) {
@@ -77,6 +81,7 @@ public class Engine {
                 return Optional.of(page);
             }
         }
+
         return Optional.empty();
     }
 

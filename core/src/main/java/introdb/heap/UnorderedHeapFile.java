@@ -1,8 +1,6 @@
 package introdb.heap;
 
-import introdb.heap.engine.Config;
 import introdb.heap.engine.Engine;
-import introdb.heap.engine.EngineFactory;
 import introdb.heap.engine.Record;
 
 import java.io.IOException;
@@ -22,24 +20,25 @@ class UnorderedHeapFile implements Store {
     private final Engine engine;
 
 	UnorderedHeapFile(Path path, int maxNrPages, int pageSize) throws IOException{
-		engine = EngineFactory.createEngine(path, maxNrPages, pageSize);
+		engine = Engine.of(path, maxNrPages, pageSize);
     }
 
 	@Override
-	synchronized public void put(Entry entry) throws IOException, ClassNotFoundException {
+    public synchronized void put(Entry entry) throws IOException, ClassNotFoundException {
 		engine.put(serialize(entry.key()), serialize(entry.value()));
 	}
 	
 	@Override
-	synchronized public Object get(Serializable key) throws IOException, ClassNotFoundException {
+    public synchronized Object get(Serializable key) throws IOException, ClassNotFoundException {
 		var valueBytes = engine.get(serialize(key))
                 .map(Record::value)
                 .orElse(null);
 
         return isNull(valueBytes) ? null : deserialize(valueBytes);
 	}
-	
-	synchronized public Object remove(Serializable key) throws IOException, ClassNotFoundException {
+
+	@Override
+	public synchronized Object remove(Serializable key) throws IOException, ClassNotFoundException {
 		var valueBytes = engine.remove(serialize(key))
                 .map(Record::value)
                 .orElse(null);
