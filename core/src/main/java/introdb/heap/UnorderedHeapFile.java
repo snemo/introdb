@@ -30,20 +30,14 @@ class UnorderedHeapFile implements Store {
 	
 	@Override
     public synchronized Object get(Serializable key) throws IOException, ClassNotFoundException {
-		var valueBytes = engine.get(serialize(key))
-                .map(Record::value)
-                .orElse(null);
-
-        return isNull(valueBytes) ? null : deserialize(valueBytes);
+		var record = engine.get(serialize(key));
+        return isNull(record) ? null : deserialize(record.value());
 	}
 
 	@Override
 	public synchronized Object remove(Serializable key) throws IOException, ClassNotFoundException {
-		var valueBytes = engine.remove(serialize(key))
-                .map(Record::value)
-                .orElse(null);
-
-		return isNull(valueBytes) ? null : deserialize(valueBytes);
+		var record = engine.remove(serialize(key));
+		return isNull(record) ? null : deserialize(record.value());
 	}
 }
 

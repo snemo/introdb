@@ -41,6 +41,17 @@ class IOController implements Iterable<Page> {
         fileChannel.write(page.toByteBuffer());
     }
 
+    public Page findPage(int no) throws IOException {
+        var byteBuffer = ByteBuffer.allocateDirect(config.pageSize());
+        fileChannel.read(byteBuffer, calcPosition(no));
+        return Page.of(no, config.pageSize(), byteBuffer);
+    }
+
+    private long calcPosition(int pageNo) {
+        long newPosition = pageNo * config.pageSize();
+        return newPosition < 0 ? 1 : newPosition;
+    }
+
     private static class PageIteratorImpl implements Iterator<Page> {
 
         private final FileChannel fileChannel;

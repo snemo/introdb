@@ -1,10 +1,16 @@
 package introdb.heap.engine;
 
+import introdb.heap.utils.ByteArrayWrapper;
+
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import static java.util.Objects.isNull;
 
 /**
  * InnoDB engine implementation based on FileChannel
@@ -17,8 +23,11 @@ public class Engine {
 
     private final IOController ioController;
 
-    private Page lastPage;          // buffer
-    private Page currentPage;       // buffer
+    // Index as a mapping between key and page number
+    private final ConcurrentMap<ByteArrayWrapper, Integer> index = new ConcurrentHashMap<>();
+
+    private volatile Page lastPage;          // buffer
+    private volatile Page currentPage;       // buffer
 
     private Engine(IOController ioController) throws IOException {
         this.ioController = ioController;
@@ -38,8 +47,9 @@ public class Engine {
         lastPage = Page.of(0, ioController.config().pageSize());
     }
 
-    public void put(byte[] key, byte[] value) throws IOException {
+    public synchronized void put(byte[] key, byte[] value) throws IOException {
         remove(key);
+
         var record = Record.of(key, value);
 
         if (lastPage.willFit(record)) {
@@ -48,23 +58,31 @@ public class Engine {
             ioController.write(lastPage);
             lastPage = Page.of(lastPage.number()+1, ioController.config().pageSize(), record);
         }
+
+        index.put(ByteArrayWrapper.of(key), lastPage.number());
     }
 
-    public Optional<Record> remove(byte[] key) throws IOException {
-        var page = getPage(key);
+    public synchronized Record remove(byte[] key) throws IOException {
+        var page = findPageByIndex(key);
 
-        var record = page.flatMap(it -> it.getRecord(key));
-        record.ifPresent(Record::delete);
-        if (record.isPresent()) { // FIXME:
-            ioController.write(page.get());
+        // if page wasn't find for this key
+        if (page == null) {
+            return null;
+        }
+
+        // delete and flush
+        var record = page.getRecord(key);
+        if (record != null) {
+            record.delete();
+            ioController.write(page);
         }
 
         return record;
     }
 
-    public Optional<Record> get(byte[] key) throws IOException {
-        return getPage(key)
-                .flatMap(page -> page.getRecord(key));
+    public synchronized Record get(byte[] key) throws IOException {
+        var page = findPageByIndex(key);
+        return isNull(page) ? null : page.getRecord(key);
     }
 
     private Optional<Page> getPage(byte[] key) throws IOException {
@@ -85,6 +103,24 @@ public class Engine {
         return Optional.empty();
     }
 
+    private Page findPageByIndex(byte[] key) throws IOException {
+        // check buffer first
+        var bufferedPage = getPageFromBuffer(key);
+        if (bufferedPage.isPresent()){
+            return bufferedPage.get();
+        }
+
+        // find page number by key in index
+        int pageNo = index.getOrDefault(ByteArrayWrapper.of(key), -1);
+
+        // if key was not found in index, return null
+        if (pageNo < 0) {
+            return null;
+        }
+
+        return ioController.findPage(pageNo);
+    }
+
     private Optional<Page> getPageFromBuffer(byte[] key) {
         return Optional.ofNullable(
                 checkBuffer(currentPage, key)
@@ -95,4 +131,6 @@ public class Engine {
         return Optional.ofNullable(page)
                 .filter(p -> p.contains(key));
     }
+
 }
+

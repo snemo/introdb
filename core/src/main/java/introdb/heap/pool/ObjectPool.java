@@ -54,7 +54,11 @@ public class ObjectPool<T> {
 	}	
 	
 	public void returnObject(T object) {
-		freePool.offer(object);
+		if (validator.validate(object)) {
+			freePool.offer(object);
+		} else {
+			poolSize.decrementAndGet();
+		}
 	}
 
 	public void shutdown() throws InterruptedException {

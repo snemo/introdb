@@ -79,9 +79,12 @@ class Page {
                 .anyMatch(it -> it.equalsKey(key) && !it.isDeleted());
     }
 
-    Optional<Record> getRecord(byte[] key) {
-        return records.stream()
-                .filter(it -> it.equalsKey(key) && !it.isDeleted())
-                .findAny();
+    Record getRecord(byte[] key) {
+        for (Record record : records) {
+            if (record.equalsKey(key) && !record.isDeleted()) {
+                return record;
+            }
+        }
+        return null;
     }
 }

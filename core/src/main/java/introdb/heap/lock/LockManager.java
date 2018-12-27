@@ -10,16 +10,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class LockManager {
 
-
-	private final ConcurrentMap<Integer, ReentrantReadWriteLock> locksInUse = new ConcurrentHashMap<>();
-
 	private final ConcurrentMap<Integer, LockRef> lockSupportInUse = new ConcurrentHashMap<>();
-
 	private final ReferenceQueue<LockSupport> lockRefQueue = new ReferenceQueue<>();
 
 
 	private ObjectPool<ReentrantReadWriteLock> objectPool;
-
 
 
 	public LockManager() {
