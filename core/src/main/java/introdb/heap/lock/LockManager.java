@@ -3,19 +3,13 @@ package introdb.heap.lock;
 import introdb.heap.pool.ObjectFactory;
 import introdb.heap.pool.ObjectPool;
 
-import java.lang.ref.ReferenceQueue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class LockManager {
 
-	private final ConcurrentMap<Integer, LockRef> lockSupportInUse = new ConcurrentHashMap<>();
-	private final ReferenceQueue<LockSupport> lockRefQueue = new ReferenceQueue<>();
-
-
 	private ObjectPool<ReentrantReadWriteLock> objectPool;
-
+    private final ConcurrentMap<Integer, LockSupportImpl> locksInUse = new ConcurrentHashMap<>();
 
 	public LockManager() {
 		objectPool = new ObjectPool<>(ReentrantReadWriteLock::new,l -> l.getWriteHoldCount() == 0 && l.getReadHoldCount() == 0);
@@ -30,18 +24,14 @@ public class LockManager {
 		// piggyback, check if some locks can be released to the pool
 		reclaimLock();
 
-		// first try to get find lock (LockSupport) which could be in use
-		var lockSupport = getLockSupportInUse(i);
+		// first try to find lock (LockSupport) which could be in use
+		var lockSupport = locksInUse.get(i);
 
 		// if there is no any locks in use for this page, create a new one
-
 		if (lockSupport == null) {
-			var lock = objectPool.borrowObject().join();
-			lockSupport = new LockSupportImpl(i, lock); // FIXME:
-			var lockRef = new LockRef(lockSupport, lockRefQueue, lock);
-			lockSupportInUse.put(i, lockRef);
+			var lockFuture = objectPool.borrowObject();
+			lockSupport = locksInUse.compute(i, (k, oldV) -> new LockSupportImpl(lockFuture));
 		}
-
 
 		return lockSupport;
 	}
@@ -50,31 +40,12 @@ public class LockManager {
 		
 	}
 
-	// thread safe
-	private LockSupport getLockSupportInUse(int i) {
-		var lockRef = lockSupportInUse.get(i);
-		if ( lockRef != null ) {
-			return lockRef.get();
-		}
-		return null;
-	}
-
-
-	private ReentrantReadWriteLock obtainLock(int key, ReentrantReadWriteLock lockInUse) {
-		if (lockInUse != null) {
-			return lockInUse;
-		}
-
-		return objectPool.borrowObject().join();
-	}
-
-	// not thread safe
 	private void reclaimLock() {
-		LockRef lockRef;
-		while ( (lockRef =  (LockRef) lockRefQueue.poll()) != null) {
-			objectPool.returnObject(lockRef.getLock());
-		}
+        locksInUse.forEach((page, lockSupport) -> { // forEach is thread safe
+            if ( lockSupport.isEligibleToCollect() ) {
+				locksInUse.remove(page);
+                objectPool.returnObject(lockSupport.getLock());
+            }
+        });
 	}
-
-
 }

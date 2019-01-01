@@ -12,15 +12,15 @@ public class Record {
     private final byte[] key;
     private final byte[] value;
 
-    Record(Header header, byte[] key, byte[] value) {
+    private Record(Header header, byte[] key, byte[] value) {
         this.key = key;
         this.value = value;
         this.header = header;
     }
 
-    static Record of(byte[] key, byte[] value) {
+    static Record of(byte[] key, byte[] value, int maxSize) {
         var header = Header.of(key, value);
-        return new Record(header, key, value);
+        return assertRecordSize(new Record(header, key, value), maxSize);
     }
 
     static Record of(ByteBuffer byteBuffer, int offset) {
@@ -79,6 +79,13 @@ public class Record {
 
     boolean isDeleted() {
         return header.isDeleted();
+    }
+
+    private static Record assertRecordSize(Record record, int maxSize) {
+        if (record.size() > maxSize) {
+            throw new IllegalArgumentException("Record exceed max size of the page.");
+        }
+        return record;
     }
 
     static class Header {

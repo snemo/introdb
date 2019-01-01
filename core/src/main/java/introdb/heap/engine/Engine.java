@@ -1,16 +1,13 @@
 package introdb.heap.engine;
 
+import introdb.heap.lock.LockManager;
+import introdb.heap.lock.LockSupport;
 import introdb.heap.utils.ByteArrayWrapper;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Iterator;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
-import static java.util.Objects.isNull;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * InnoDB engine implementation based on FileChannel
@@ -22,115 +19,123 @@ import static java.util.Objects.isNull;
 public class Engine {
 
     private final IOController ioController;
+    private final LockManager lockManager;
 
     // Index as a mapping between key and page number
     private final ConcurrentMap<ByteArrayWrapper, Integer> index = new ConcurrentHashMap<>();
 
-    private volatile Page lastPage;          // buffer
-    private volatile Page currentPage;       // buffer
+    // last page buffer
+    private volatile AtomicReference<Page> lastPage;
 
-    private Engine(IOController ioController) throws IOException {
+    private Engine(IOController ioController, LockManager lockManager) throws IOException {
         this.ioController = ioController;
+        this.lockManager = lockManager;
         init();
     }
 
-    static Engine of(IOController ioController) throws IOException {
-        return new Engine(ioController);
-    }
-
-    public static Engine of(Path path, int maxNrPages, int pageSize) throws IOException {
-        return new Engine(IOController.of(path, maxNrPages, pageSize));
+    public static Engine of(LockManager lockManager, Path path, int maxNrPages, int pageSize) throws IOException {
+        return new Engine(IOController.of(path, maxNrPages, pageSize), lockManager);
     }
 
     public void init() throws IOException {
         ioController.init();
-        lastPage = Page.of(0, ioController.config().pageSize());
+        lastPage = new AtomicReference<>(Page.of(0, ioController.config().pageSize()));
     }
 
-    public synchronized void put(byte[] key, byte[] value) throws IOException {
-        remove(key);
+    public void put(byte[] key, byte[] value) throws IOException {
+        var record = Record.of(key, value, ioController.config().pageSize());
 
-        var record = Record.of(key, value);
+        remove(key); // remove old record if exists - no duplicates
 
-        if (lastPage.willFit(record)) {
-            lastPage.addRecord(record);
-        } else {
-            ioController.write(lastPage);
-            lastPage = Page.of(lastPage.number()+1, ioController.config().pageSize(), record);
-        }
+        var tmpLastPage = lastPage.get();
+        var lock = lockManager.lockForPage(tmpLastPage.number());
 
-        index.put(ByteArrayWrapper.of(key), lastPage.number());
+        execute(
+            lock.inWriteOperation(() -> {
+                for (;;) {
+                    var page = lastPage.get();
+
+                    if (page.addRecord(record)) {
+                        index.put(ByteArrayWrapper.of(key), page.number());
+                        ioController.write(page);
+                        break;
+                    } else {
+                        var newPage = Page.of(page.number()+1, ioController.config().pageSize(), record);
+                        index.put(ByteArrayWrapper.of(key), newPage.number());
+                        if (! lastPage.compareAndSet(page, newPage)) {
+                            continue;
+                        }
+                        ioController.write(newPage);
+                        break;
+                    }
+                }
+                return null;
+        }));
     }
 
-    public synchronized Record remove(byte[] key) throws IOException {
-        var page = findPageByIndex(key);
-
-        // if page wasn't find for this key
-        if (page == null) {
-            return null;
+    public Record remove(byte[] key) {
+        // check buffer first
+        var tmpLastPage = lastPage.get();
+        if (tmpLastPage != null && tmpLastPage.contains(key)) {
+            var lock = lockManager.lockForPage(tmpLastPage.number());
+            return execute(
+                    lock.inWriteOperation(() ->
+                            remove(tmpLastPage, key)));
         }
-
-        // delete and flush
-        var record = page.getRecord(key);
-        if (record != null) {
-            record.delete();
-            ioController.write(page);
-        }
-
-        return record;
-    }
-
-    public synchronized Record get(byte[] key) throws IOException {
-        var page = findPageByIndex(key);
-        return isNull(page) ? null : page.getRecord(key);
-    }
-
-    private Optional<Page> getPage(byte[] key) throws IOException {
-        var bufferPage = getPageFromBuffer(key);
-        if (bufferPage.isPresent()){
-            return bufferPage;
-        }
-
-        Iterator<Page> iterator = ioController.iterator();
-        while (iterator.hasNext()) {
-            var page = iterator.next();
-            if (page.contains(key)) {
-                currentPage = page;
-                return Optional.of(page);
+        // check index
+        else {
+            int pageNo = index.getOrDefault(ByteArrayWrapper.of(key), -1);
+            if (pageNo > -1 ) {
+                var lock = lockManager.lockForPage(pageNo);
+                return execute(
+                        // lock sequence = writeLock.lock -> readLock.lock -> readLock.unlock() -> writeLock.unlock()
+                        lock.inWriteOperation(() ->
+                                remove(getPage(pageNo, lock), key)));
             }
         }
 
-        return Optional.empty();
+        return null;
     }
 
-    private Page findPageByIndex(byte[] key) throws IOException {
-        // check buffer first
-        var bufferedPage = getPageFromBuffer(key);
-        if (bufferedPage.isPresent()){
-            return bufferedPage.get();
+    public Record get(byte[] key) throws IOException {
+        // check buffer first;
+        Record record;
+        if (null != (record = lastPage.get().getRecord(key))) {
+            return record;
         }
 
-        // find page number by key in index
         int pageNo = index.getOrDefault(ByteArrayWrapper.of(key), -1);
-
-        // if key was not found in index, return null
-        if (pageNo < 0) {
-            return null;
+        if (pageNo > -1 ) {
+            var lock = lockManager.lockForPage(pageNo);
+            return execute(
+                    lock.inReadOperation(() ->
+                            ioController.findPage(pageNo).getRecord(key)));
         }
 
-        return ioController.findPage(pageNo);
+        return null;
     }
 
-    private Optional<Page> getPageFromBuffer(byte[] key) {
-        return Optional.ofNullable(
-                checkBuffer(currentPage, key)
-                .orElseGet(()-> checkBuffer(lastPage, key).orElse(null)));
+    private Record remove(Page page, byte[] key) {
+        var record = page.getRecord(key);
+        if (record != null) {
+            index.remove(ByteArrayWrapper.of(key)); // remove from index first
+            record.delete();
+            ioController.write(page);
+        }
+        return record;
     }
 
-    private Optional<Page> checkBuffer(Page page, byte[] key) {
-        return Optional.ofNullable(page)
-                .filter(p -> p.contains(key));
+    private Page getPage(int no, LockSupport lock) {
+        return execute(
+                lock.inReadOperation(() -> ioController.findPage(no)));
     }
 
+    private <R> R execute(CompletableFuture<R> future) {
+        try {
+            return future.get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }
 

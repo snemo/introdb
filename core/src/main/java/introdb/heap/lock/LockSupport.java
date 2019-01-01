@@ -10,5 +10,4 @@ public interface LockSupport {
 	<R> CompletableFuture<R> inWriteOperation(Supplier<R> supplier);
 	
 	String toString();
-	
 }

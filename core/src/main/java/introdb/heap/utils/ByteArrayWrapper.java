@@ -25,8 +25,21 @@ public class ByteArrayWrapper {
         return Arrays.equals(data, that.data);
     }
 
+    // Arrays.hashCode have massive number of collisions
+    // https://bugs.openjdk.java.net/browse/JDK-8134141
     @Override
     public int hashCode() {
-        return Arrays.hashCode(data);
+        if (data == null)
+            return 0;
+
+        int result = 1;
+        for (byte element : data)
+            result = 257 * result + element;
+
+        return result;
+    }
+
+    public byte[] getData() {
+        return data;
     }
 }

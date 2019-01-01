@@ -1,20 +1,17 @@
 package introdb.heap.engine;
 
 import java.nio.ByteBuffer;
-import java.util.HashSet;
-import java.util.Optional;
-import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 class Page {
 
     private final int number;
     private final int maxSize;
-    private Set<Record> records;
+    private final CopyOnWriteArrayList<Record> records = new CopyOnWriteArrayList<>();
 
     Page(int number, int maxSize) {
         this.number = number;
         this.maxSize = maxSize;
-        records = new HashSet<>();
     }
 
     static Page of(int number, int maxSize) {
@@ -41,11 +38,13 @@ class Page {
         return page;
     }
 
-    void addRecord(Record record) {
+    // this need to be synchronized -> critical section!
+    synchronized boolean addRecord(Record record) {
         if (!willFit(record)) {
-            throw new IllegalArgumentException("Record is too big for current size of the page.");
+            return false;
         }
-        this.records.add(record);
+
+        return this.records.add(record);
     }
 
     ByteBuffer toByteBuffer() {
