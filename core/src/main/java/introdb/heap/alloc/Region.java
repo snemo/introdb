@@ -2,7 +2,7 @@ package introdb.heap.alloc;
 
 import java.util.Objects;
 
-class Region {
+class Region implements Comparable<Region> {
 
 	private final int pageNr;
 	private final int offset;
@@ -53,7 +53,14 @@ class Region {
 		.append("]")
 		.toString();
 	}
-	
-	
 
+	@Override
+	public int compareTo(Region region) {
+		if (pageNr > region.pageNr || (pageNr == region.pageNr && offset > region.offset)) {
+			return 1;
+		} else if (pageNr < region.pageNr || (pageNr == region.pageNr && offset < region.offset)) {
+			return -1;
+		}
+		return 0;
+	}
 }
